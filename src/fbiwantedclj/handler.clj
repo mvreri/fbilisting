@@ -18,47 +18,79 @@
            (GET "/" [] "Hello World")
 
            (GET "/api/v1/fbi/list" request
-             ;(timbre/info (get-in request [:query-string]))
-             (timbre/info (request-to-keywords (get-in request [:query-string])) )
-             ;(timbre/info (get-in request [:params]))
-             ;(timbre/info (query/make-fbi-list-request (request-to-keywords (get-in request [:query-string]))))
-             (let [defaultparams {:page "1", :limit 20}
+             (let [defaultparams {:page 1, :limit 20}
                    body (request-to-keywords (get-in request [:query-string]))
                    _ (timbre/info (:limit body))
                    limit (if (= (:limit body) nil)
-                           20
+                           (:limit defaultparams)
                            (if (number? (:limit body)) (:limit body) (Double/parseDouble (:limit body)))
                            )
                    fbireq (query/make-fbi-list-request body)
-                   listnum (:total fbireq)
-                   listpg (:page fbireq)
-                   allpages (/ listnum (:defaultparams limit))
+                   ;after the listing is called
+                   allpages (double (/ (:total fbireq) 20))
                    ]
                ;post the response expected back to the UI
-               (json/write-str {:data {
-                                    :status 200
-                                    :title (str "FBI List" )
-                                    :details fbireq
-                                       :page listpg
-                                       :total_records listnum
-                                    }
-                             })
+               (if (not= (:status fbireq) 200)
+                 (json/write-str {:errors {
+                                         :status (:status fbireq)
+                                         :title (str "FBI List" )
+                                         :details (:message fbireq)
+                                         }
+                                  })
+                 (json/write-str {:data {
+                                         :status (:status fbireq)
+                                         :title (str "FBI List" )
+                                         :details fbireq
+                                         :page (:page fbireq)
+                                         :total_records (:total fbireq)
+                                         :number_of_pages allpages
+                                         }
+                                  })
+                 )
+
                )
              )
 
-           (POST "/api/v1/fbi/list" request
+
+           (GET "/api/v1/fbi/search" request
+             (let [defaultparams {:page 1, :limit 20}
+                   body (request-to-keywords (get-in request [:query-string]))
+                   ;fbireq (query/search-fbi-list body)
+                   fbireq (query/search-fbi-list-request body)
+                   ;after the listing is called
+                   allpages (double (/ (:total fbireq) 20))
+                   ]
+               ;post the response expected back to the UI
+               (if (not= (:status fbireq) 200)
+                 (json/write-str {:errors {
+                                         :status (:status fbireq)
+                                         :title (str "FBI List Search" )
+                                         :details (:message fbireq)
+                                         }
+                                  })
+                 (json/write-str {:data {
+                                         :status (:status fbireq)
+                                         :title (str "FBI List Search" )
+                                         :details fbireq
+                                         :page (:page fbireq)
+                                         :total_records (:total fbireq)
+                                         :number_of_pages allpages
+                                         }
+                                  })
+                 )
+               )
+             )
+
+           ;add records from the endpoints to the database
+           (POST "/api/v1/fbi/list/update" request
              (let [body (walk/keywordize-keys (:body request))
-                   listnum (query/make-fbi-list-request body)
-                   limit (if (number? (:limit (:usersparams body))) (:limit (:usersparams body)) (Double/parseDouble (:limit (:usersparams body))))
-                   pages (/ listnum limit)
+                   updatelist (query/make-fbi-list-request body)
                    ]
                ;post the response expected back to the UI
                (with-out-str (json/pprint {:data {
-                                                  :status 200
-                                                  :title (str "FBI List" )
-                                                  :detail (query/make-fbi-list-request (:refno body))
-                                                  :currentpage (if (number? (:page (:usersparams body))) (:page (:usersparams body)) (Double/parseDouble (:page (:usersparams body))))
-                                                  :totalpages (Math/ceil pages)
+                                                  :status 201
+                                                  :title (str "FBI List Updated" )
+                                                  :detail (str "Most wanted list updated successfully")
                                                   }
                                            })
                              )

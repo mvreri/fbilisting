@@ -43,6 +43,8 @@
 ;(timbre/info fbi-base-url)
 
 ;utility fns
+(defn uuid [] (str (java.util.UUID/randomUUID)))
+
 (defn convert-json-to-map [req]
   (walk/keywordize-keys (walk/keywordize-keys (json/read-str req)))
   )
@@ -70,6 +72,21 @@
   )
 
 
+;db functions
+(defn search-fbi-list [keyval]
+  (let [srchqry (connect-db-run-query-with-result
+                  (format "SELECT details::text details
+             FROM tbl_wanted_suspects
+             WHERE details->>'%s' = '%s';"
+                          (:q keyval) (:a keyval)
+                          )
+                  )
+        ]
+    (timbre/info srchqry)
+    srchqry
+    )
+  )
+
 (defn get-fbi-list [susref]
   (connect-db-run-query-with-result
     (format "SELECT refno refno, details::text details
@@ -80,9 +97,23 @@
     )
   )
 
+(defn update-fbi-list [susdetails]
+  (doseq [a susdetails]
+    (connect-db-run-query (format "INSERT INTO tbl_wanted_suspects (refno, status, details)
+                                                     SELECT '%s','%s','%s'
+                                                     WHERE NOT EXISTS (SELECT details FROM tbl_wanted_suspects WHERE details->>'uuid'::text = '%s');"
+                                  (str (uuid))
+                                  (str "active")
+                                  (clojure.string/replace (json/write-str a) #"'" "''")
+                                  (:uid a)
+                                  )
+                          )
+    )
+  )
+
 (defn make-fbi-list-request [req]
   "this is where we fetch the data from"
-  ;(timbre/info req)
+  (timbre/info req)
   ;(timbre/info fbi-base-url)
   (let [fbilst (httpclient/get (str fbi-base-url "?page=" (:page req))
                                {
@@ -98,7 +129,7 @@
 
     ;validate response using the http status code
     (if (= (:status fbilst) 200)
-      (let [
+      (let [ _ (timbre/info "Successfully retrieved records from")
             fbilist (:body fbilst)
             fbilist_map (convert-json-to-map fbilist)
             ]
@@ -109,27 +140,124 @@
              :total 0, :items [], :page 0, :message (str "No more records found")
              }
             )
-          (let [fbilist_map (assoc fbilist_map :message  (str "Records retrieved successfully"))]
+          (let [
+                fbilist_map (assoc fbilist_map :message  (str "Records retrieved successfully"))
+                fbilist_map (assoc fbilist_map :status  (:status fbilst))
+                ]
+            ;(timbre/info (double (/ (:total fbilist_map) 20))) ;all the pages that exist so that we do not fetch empty pages
             fbilist_map
             )
           )
         )
       (if (= (:status fbilst) 404)
-        {
-         :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Response Not Found")
-         }
-        (if (= (:status fbilst) 403)
+        (do
+          (timbre/error (str "Error: " (:status fbilst) " - Response Not Found"))
           {
-           :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - URL Access Forbidden")
+           :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Response Not Found")
            }
-          (if (= (:status fbilst) 500)
+          )
+        (if (= (:status fbilst) 403)
+          (do
+            (timbre/error (str "Error: " (:status fbilst) " - URL Access Forbidden"))
             {
-             :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Internal Server error")
+             :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - URL Access Forbidden")
              }
-            (if (= (:status fbilst) 503)
+            )
+          (if (= (:status fbilst) 500)
+            (do
+              (timbre/error (str "Error: " (:status fbilst) " - Internal Server error"))
               {
-               :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Service Unavailable")
+               :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Internal Server error")
                }
+              )
+            (if (= (:status fbilst) 503)
+              (do
+                (timbre/error (str "Error: " (:status fbilst) " - Service Unavailable"))
+                {
+                 :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Service Unavailable")
+                 }
+                )
+              )
+            )
+          )
+        )
+      )
+    )
+  )
+
+
+;update the records that we have so that we can retrieve them in a scenario where we dont need to call the endpoint
+;;(future (update-fbi-list (:items fbilist_map)))
+
+
+;search through the API
+(defn search-fbi-list-request [req]
+  "this is where we fetch the data from"
+  (timbre/info req)
+  ;(timbre/info fbi-base-url)
+  (let [fbilst (httpclient/get (str fbi-base-url "?" (:q req) "=" (:a req))
+                               {
+                                :headers       {}
+                                :insecure? true
+                                :max-redirects 5
+                                :redirect-strategy :graceful
+                                :socket-timeout 1000
+                                :connection-timeout 1000
+                                }
+                               )
+        ]
+
+    ;validate response using the http status code
+    (if (= (:status fbilst) 200)
+      (let [ _ (timbre/info "Successfully retrieved search records from")
+            fbilist (:body fbilst)
+            fbilist_map (convert-json-to-map fbilist)
+            ]
+(timbre/info fbilist_map)
+        (if (= (count (:items fbilist_map)) 0)
+          (do
+            (timbre/info (str "No results found for the search phrase " (:q req) "=" (:a req)) )
+            {
+             :total 0, :items [], :page 0, :message (str "No more records found")
+             }
+            )
+          (let [
+                fbilist_map (assoc fbilist_map :message  (str "Records retrieved successfully"))
+                fbilist_map (assoc fbilist_map :status  (:status fbilst))
+                ]
+            ;(timbre/info (double (/ (:total fbilist_map) 20))) ;all the pages that exist so that we do not fetch empty pages
+            fbilist_map
+            )
+          )
+        )
+      (if (= (:status fbilst) 404)
+        (do
+          (timbre/error (str "Error: " (:status fbilst) " - Response Not Found"))
+          {
+           :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Response Not Found")
+           }
+          )
+        (if (= (:status fbilst) 403)
+          (do
+            (timbre/error (str "Error: " (:status fbilst) " - URL Access Forbidden"))
+            {
+             :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - URL Access Forbidden")
+             }
+            )
+          (if (= (:status fbilst) 500)
+            (do
+              (timbre/error (str "Error: " (:status fbilst) " - Internal Server error"))
+              {
+               :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Internal Server error")
+               }
+              )
+            (if (= (:status fbilst) 503)
+              (do
+                (timbre/error (str "Error: " (:status fbilst) " - Service Unavailable"))
+                {
+                 :status  (:status fbilst), :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Service Unavailable")
+                 }
+                )
               )
             )
           )

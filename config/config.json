@@ -2,10 +2,10 @@
   "application": "FBI Search",
   "fbi-base-url": "https://api.fbi.gov/wanted/v1/list",
   "db-subprotocol": "postgresql",
-  "db-subname": "//147.182.238.9:5455/api_gateway",
+  "db-subname": "//147.182.238.9:5455/db_fbilist",
   "db-host": "147.182.238.9",
   "db-port": "5455",
-  "db-name": "api_gateway",
+  "db-name": "db_fbilist",
   "db-user": "postgres",
   "db-password": "#$o^op(3r13_o(0pR++"
 }

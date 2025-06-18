@@ -9,8 +9,42 @@
             [clojure.walk :as walk]
             [ring.middleware.defaults :refer [wrap-defaults site-defaults]]))
 
+;convert query strings to keywords
+(defn request-to-keywords [req]
+  (into {} (for [[_ k v] (re-seq #"([^&=]+)=([^&]+)" req)]
+             [(keyword k) v])))
+
 (defroutes app-routes
            (GET "/" [] "Hello World")
+
+           (GET "/api/v1/fbi/list" request
+             ;(timbre/info (get-in request [:query-string]))
+             (timbre/info (request-to-keywords (get-in request [:query-string])) )
+             ;(timbre/info (get-in request [:params]))
+             ;(timbre/info (query/make-fbi-list-request (request-to-keywords (get-in request [:query-string]))))
+             (let [defaultparams {:page "1", :limit 20}
+                   body (request-to-keywords (get-in request [:query-string]))
+                   _ (timbre/info (:limit body))
+                   limit (if (= (:limit body) nil)
+                           20
+                           (if (number? (:limit body)) (:limit body) (Double/parseDouble (:limit body)))
+                           )
+                   fbireq (query/make-fbi-list-request body)
+                   listnum (:total fbireq)
+                   listpg (:page fbireq)
+                   allpages (/ listnum (:defaultparams limit))
+                   ]
+               ;post the response expected back to the UI
+               (json/write-str {:data {
+                                    :status 200
+                                    :title (str "FBI List" )
+                                    :details fbireq
+                                       :page listpg
+                                       :total_records listnum
+                                    }
+                             })
+               )
+             )
 
            (POST "/api/v1/fbi/list" request
              (let [body (walk/keywordize-keys (:body request))
@@ -30,6 +64,7 @@
                              )
                )
              )
+
            (route/not-found "Not Found"))
 
 (defn wrap-fallback-exception

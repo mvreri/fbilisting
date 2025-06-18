@@ -15,7 +15,7 @@
             [clj-time.coerce :as tc]
             [clj-time.local :as l]
             [clj-time.jdbc :as jd]
-    )
+            )
   )
 
 ;initializing the config values in this namespace
@@ -42,22 +42,98 @@
 ;testing whether we receive config values here
 ;(timbre/info fbi-base-url)
 
+;utility fns
+(defn convert-json-to-map [req]
+  (walk/keywordize-keys (walk/keywordize-keys (json/read-str req)))
+  )
+
+;ueries that dont need results
+(defn connect-db-run-query [fq]
+  (try
+    (with-db db-connection-fbisrvc (exec-raw fq))
+    (catch Exception e
+      {:status 500 :body {
+                          :title "Database Error"
+                          :description  e}}))
+
+  )
+
+;queries that expect results
+(defn connect-db-run-query-with-result [fq]
+  (try
+    (with-db db-connection-fbisrvc (exec-raw fq :results))
+    (catch Exception e
+      {:status 500 :body {
+                          :title "Database Error"
+                          :description  e}}))
+
+  )
+
+
+(defn get-fbi-list [susref]
+  (connect-db-run-query-with-result
+    (format "SELECT refno refno, details::text details
+             FROM tbl_wanted_suspects
+             WHERE refno = '%s';"
+            susref
+            )
+    )
+  )
+
 (defn make-fbi-list-request [req]
   "this is where we fetch the data from"
-  (let [
-        sim (:body (httpclient/post (str fbi-base-url )
-                                    {
-                                     :headers       {}
-                                     :body          (json/write-str req)
-                                     :body-encoding "UTF-8"
-                                     :content-type  :json
-                                     :accept        :json
-                                     }
-                                    )
-              )
-        _ (timbre/info "sim >>>>> " sim)
+  ;(timbre/info req)
+  ;(timbre/info fbi-base-url)
+  (let [fbilst (httpclient/get (str fbi-base-url "?page=" (:page req))
+                               {
+                                :headers       {}
+                                :insecure? true
+                                :max-redirects 5
+                                :redirect-strategy :graceful
+                                :socket-timeout 1000
+                                :connection-timeout 1000
+                                }
+                               )
         ]
-    sim
-    )
 
+    ;validate response using the http status code
+    (if (= (:status fbilst) 200)
+      (let [
+            fbilist (:body fbilst)
+            fbilist_map (convert-json-to-map fbilist)
+            ]
+
+        (if (= (count (:items fbilist_map)) 0)
+          (do
+            {
+             :total 0, :items [], :page 0, :message (str "No more records found")
+             }
+            )
+          (let [fbilist_map (assoc fbilist_map :message  (str "Records retrieved successfully"))]
+            fbilist_map
+            )
+          )
+        )
+      (if (= (:status fbilst) 404)
+        {
+         :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Response Not Found")
+         }
+        (if (= (:status fbilst) 403)
+          {
+           :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - URL Access Forbidden")
+           }
+          (if (= (:status fbilst) 500)
+            {
+             :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Internal Server error")
+             }
+            (if (= (:status fbilst) 503)
+              {
+               :total 0, :items [], :page 0, :message (str "Error: " (:status fbilst) " - Service Unavailable")
+               }
+              )
+            )
+          )
+        )
+      )
+    )
   )

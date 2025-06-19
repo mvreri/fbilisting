@@ -20,7 +20,7 @@
            (GET "/api/v1/fbi/list" request
              (let [defaultparams {:page 1, :limit 20}
                    body (request-to-keywords (get-in request [:query-string]))
-                   _ (timbre/info (:limit body))
+                   body (if (= body nil) defaultparams body)
                    limit (if (= (:limit body) nil)
                            (:limit defaultparams)
                            (if (number? (:limit body)) (:limit body) (Double/parseDouble (:limit body)))
@@ -112,11 +112,15 @@
       (middleware/wrap-json-body)
       (middleware/wrap-json-response)
       (wrap-defaults app-routes)
-      (wrap-cors :access-control-allow-origin [#".*"]
-                 :access-control-allow-methods [:post :get]
-                 :access-control-allow-header ["Access-Control-Allow-Origin" "*"
-                                               "Origin" "X-Requested-With"
-                                               "Content-Type" "Accept"]
+      (wrap-cors :access-control-allow-credentials "true"
+                 :access-control-allow-origin      [#".*"]
+                 :access-control-allow-headers #{"accept"
+                                                 "accept-encoding"
+                                                 "accept-language"
+                                                 "authorization"
+                                                 "content-type"
+                                                 "origin"}
+                 :access-control-allow-methods     [:get :put :post :delete :options]
                  )
       (wrap-fallback-exception)
       )
